@@ -133,7 +133,7 @@ def resolver(
                 conf.install_weak_deps = install_weak_deps
 
             conf.installroot = str(root_dir)
-            conf.cachedir = os.path.join(cache_dir, "cache")
+            conf.cachedir = str(utils.CACHE_PATH / "dnf" / arch)
             conf.logdir = mkdir(os.path.join(cache_dir, "log"))
             conf.persistdir = mkdir(os.path.join(cache_dir, "dnf"))
             conf.substitutions["arch"] = arch
