@@ -1,5 +1,8 @@
 build/
 venv/
+test_data/
+.devcontainer/
+.vscode/
 __pycache__
 *.swp
 *.swo

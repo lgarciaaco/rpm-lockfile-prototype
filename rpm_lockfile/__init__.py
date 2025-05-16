@@ -26,7 +26,7 @@ except ImportError:
     sys.exit(127)
 import yaml
 
-from . import containers, content_origin, schema, utils
+from . import containers, content_origin, log, schema, utils
 
 CONTAINERFILE_HELP = """
 Load installed packages from base image specified in Containerfile and make
@@ -51,16 +51,13 @@ VALIDATE_HELP = "Run schema validation on the input file."
 PRINT_SCHEMA_HELP = "Print schema for the input file to stdout."
 ALLOWERASING_HELP = "Allow  erasing  of  installed  packages to resolve dependencies."
 
-
 def copy_local_rpmdb(cache_dir):
     shutil.copytree("/" + utils.RPMDB_PATH, os.path.join(cache_dir, utils.RPMDB_PATH))
-
 
 def strip_suffix(s, suf):
     if s.endswith(suf):
         return s[: -len(suf)]
     return s
-
 
 @dataclass(frozen=True, order=True)
 class PackageItem:
@@ -90,7 +87,6 @@ class PackageItem:
             del d["sourcerpm"]
         return d
 
-
 def filter_for_arch(arch, pkgs):
     """Given an iterator with packages, keep only those that should be included
     on the given architecture.
@@ -102,11 +98,9 @@ def filter_for_arch(arch, pkgs):
             if _arch_matches(pkg.get("arches", {}), arch):
                 yield pkg["name"]
 
-
 def mkdir(dir):
     os.mkdir(dir)
     return dir
-
 
 def resolver(
     arch: str,
@@ -239,7 +233,6 @@ def resolver(
 
     return packages, sources, module_metadata
 
-
 def rpmdb_preparer(func=None):
     @contextlib.contextmanager
     def worker(arch):
@@ -250,20 +243,16 @@ def rpmdb_preparer(func=None):
 
     return worker
 
-
 def empty_rpmdb():
     return rpmdb_preparer()
 
-
 def local_rpmdb():
     return rpmdb_preparer(lambda root_dir, _: copy_local_rpmdb(root_dir))
-
 
 def image_rpmdb(baseimage):
     return rpmdb_preparer(
         lambda root_dir, arch: containers.setup_rpmdb(root_dir, baseimage, arch)
     )
-
 
 def process_arch(
     arch,
@@ -278,7 +267,7 @@ def process_arch(
     install_weak_deps: bool,
     upgrade_packages: set[str],
 ):
-    logging.info("Running solver for %s", arch)
+    log.set_thread_arch(arch)
 
     with rpmdb(arch) as root_dir:
         packages, sources, module_metadata = resolver(
@@ -302,7 +291,6 @@ def process_arch(
         "module_metadata": list(sorted(module_metadata, key=lambda x: x["url"])),
     }
 
-
 def collect_content_origins(config_dir, origins):
     loaders = content_origin.load()
     repos = []
@@ -313,7 +301,6 @@ def collect_content_origins(config_dir, origins):
             raise RuntimeError(f"Unknown content origin '{source_type}'")
         repos.extend(collector.collect(source_data))
     return repos
-
 
 def read_packages_from_treefile(arch, treefile):
     # Reference: https://coreos.github.io/rpm-ostree/treefile/
@@ -353,7 +340,6 @@ def read_packages_from_treefile(arch, treefile):
         # TODO exclude-packages might be needed here
     return packages
 
-
 def _arch_matches(spec, arch):
     only = spec.get("only", [])
     if isinstance(only, str):
@@ -366,7 +352,6 @@ def _arch_matches(spec, arch):
         (not only or arch in only) and
         (not not_ or arch not in not_)
     )
-
 
 def read_packages_from_container_yaml(arch):
     packages = set()
@@ -382,7 +367,6 @@ def read_packages_from_container_yaml(arch):
 
     return packages
 
-
 def _get_containerfile_path(config_dir, context):
     cf = context.get("containerfile")
     if isinstance(cf, dict):
@@ -390,7 +374,6 @@ def _get_containerfile_path(config_dir, context):
     if isinstance(cf, str):
         return utils.relative_to(config_dir, cf)
     return None
-
 
 def _get_containerfile_filters(context):
     cf = context.get("containerfile")
@@ -401,27 +384,6 @@ def _get_containerfile_filters(context):
             "image_pattern": cf.get("imagePattern"),
         }
     return {}
-
-
-def logging_setup(debug=False):
-
-    class ExcludeErrorsFilter(logging.Filter):
-        def filter(self, record):
-            """Only lets through log messages with log level below ERROR."""
-            return record.levelno < logging.ERROR
-
-    console_stdout = logging.StreamHandler(stream=sys.stdout)
-    console_stdout.addFilter(ExcludeErrorsFilter())
-    console_stdout.setLevel(logging.DEBUG if debug else logging.INFO)
-
-    console_stderr = logging.StreamHandler(stream=sys.stderr)
-    console_stderr.setLevel(logging.ERROR)
-
-    logging.basicConfig(
-        level=logging.DEBUG if debug else logging.INFO,
-        handlers=[console_stdout, console_stderr],
-    )
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -450,7 +412,7 @@ def main():
     )
     args = parser.parse_args()
 
-    logging_setup(args.debug)
+    log.setup(args.debug)
 
     config_dir = os.path.dirname(os.path.realpath(args.infile))
     with open(args.infile) as f:
@@ -533,13 +495,12 @@ def main():
             )
 
         # Collect results
-        for future in as_completed(futures):
+        for future in futures:
             data["arches"].append(future.result())
 
     with open(args.outfile, "w") as f:
         # Sorting by keys would put the version info at the end...
         yaml.dump(data, f, sort_keys=False, explicit_start=True)
-
 
 if __name__ == "__main__":
     main()
